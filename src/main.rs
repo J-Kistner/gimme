@@ -1,11 +1,9 @@
 mod gathering;
-mod tui;
 
 use crate::gathering::{
-   Conversation, SessionInfo, generate_session_id, setup_ollama, store_conversation,
-   stream_response, has_tool_calls, get_tool_calls, create_search_result_message, search,
+   Conversation, SessionInfo, create_search_result_message, generate_session_id, get_tool_calls,
+   has_tool_calls, search, setup_ollama, store_conversation, stream_response,
 };
-use crate::tui::user_input;
 use gathering::STORAGE_PATH;
 use ollama_rs::generation::chat::ChatMessage;
 use ollama_rs::generation::chat::ChatMessageResponseStream;
@@ -36,72 +34,17 @@ async fn main() {
       session_id: session_id,
    };
 
-   loop {
-      // LLM Response/printing
-      let complete_response = {
-         let mut stream: ChatMessageResponseStream = stream_response(&ollama, &conversation).await;
-         let mut complete_response = String::new();
-         while let Some(response) = stream.next().await {
-            let response = response.expect("Failed to get response");
-            complete_response = complete_response + &response.message.content;
-            print!("{}", response.message.content);
-         }
-         complete_response
-      };
-      
-      // Create assistant message
-      let assistant_msg = ChatMessage::assistant(complete_response);
-      conversation.push(assistant_msg.clone());
-      
-      // Check for tool calls
-      if has_tool_calls(&assistant_msg) {
-         let tool_calls = get_tool_calls(&assistant_msg);
-         
-         for tool_call in tool_calls {
-            if tool_call.function.name == "search" {
-               // Extract query from arguments
-               if let Some(query) = tool_call.function.arguments.get("query") {
-                  if let Some(query_str) = query.as_str() {
-                     println!("\n[Searching for: {}]", query_str);
-                     
-                     // Execute search
-                     let search_result = match search(query_str).await {
-                        Ok(results) => {
-                           let mut formatted = String::from("\n**Search Results:**\n");
-                           for (i, result) in results.iter().take(5).enumerate() {
-                              formatted.push_str(&format!(
-                                 "{}. [{}]({})\n   {}\n",
-                                 i + 1,
-                                 result.title,
-                                 result.url,
-                                 result.snippet
-                              ));
-                           }
-                           formatted
-                        }
-                        Err(e) => format!("Error searching: {}", e),
-                     };
-                     
-                     println!("{}", search_result);
-                     
-                     // Add tool result to conversation
-                     conversation.push(create_search_result_message(search_result));
-                     
-                     // Continue loop to get refined response with search results
-                     continue;
-                  }
-               }
-            }
-         }
+   // LLM Response/printing
+   let complete_response = {
+      let mut stream: ChatMessageResponseStream = stream_response(&ollama, &conversation).await;
+      let mut complete_response = String::new();
+      while let Some(response) = stream.next().await {
+         let response = response.expect("Failed to get response");
+         complete_response = complete_response + &response.message.content;
+         print!("{}", response.message.content);
       }
-      
-      store_conversation(&session_info, &conversation);
-
-      // User input feedback
-      let feedback = user_input();
-      assert!(feedback.len() > 0);
-      conversation.push(ChatMessage::user(feedback));
-   }
+      complete_response
+   };
 }
 
 fn setup_storage_path() -> Result<(), Box<dyn std::error::Error>> {
